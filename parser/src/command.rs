@@ -10,6 +10,7 @@ pub mod ping;
 pub mod prioritize;
 pub mod relabel;
 pub mod second;
+pub mod triage;
 
 pub fn find_command_start(input: &str, bot: &str) -> Option<usize> {
     input.to_ascii_lowercase().find(&format!("@{}", bot))
@@ -25,6 +26,7 @@ pub enum Command<'a> {
     Second(Result<second::SecondCommand, Error<'a>>),
     Glacier(Result<glacier::GlacierCommand, Error<'a>>),
     Close(Result<close::CloseCommand, Error<'a>>),
+    Triage(Result<triage::TriageCommand, Error<'a>>),
 }
 
 #[derive(Debug)]
@@ -124,6 +126,11 @@ impl<'a> Input<'a> {
             Command::Close,
             &original_tokenizer,
         ));
+        success.extend(parse_single_command(
+            triage::TriageCommand::parse,
+            Command::Triage,
+            &original_tokenizer,
+        ));
 
         if success.len() > 1 {
             panic!(
@@ -183,6 +190,7 @@ impl<'a> Command<'a> {
             Command::Second(r) => r.is_ok(),
             Command::Glacier(r) => r.is_ok(),
             Command::Close(r) => r.is_ok(),
+            Command::Triage(r) => r.is_ok(),
         }
     }
 
