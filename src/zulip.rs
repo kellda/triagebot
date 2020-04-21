@@ -1,6 +1,6 @@
 use crate::db::notifications::add_metadata;
 use crate::db::notifications::{self, delete_ping, move_indices, record_ping, Identifier};
-use crate::github::{self, GithubClient};
+use crate::github::{self, GithubClient, Label, Query, QueryKind, Repository};
 use crate::handlers::Context;
 use anyhow::Context as _;
 use std::convert::TryInto;
@@ -159,6 +159,15 @@ fn handle_command<'a>(
                 })
                 .unwrap(),
             },
+            Some("promoted") => match promote_regression_issues(&ctx.github, words).await {
+                Ok(r) => r,
+                Err(e) => serde_json::to_string(&Response {
+                    content: &format!(
+						"Failed to parse promotion, expected `promoted <past> to <current> [repo]`: {:?}.",
+						e
+					),
+                }).unwrap(),
+            }
             _ => {
                 while let Some(word) = next {
                     if word == "@**triagebot**" {
@@ -737,6 +746,61 @@ async fn post_waiter(
 
     Ok(serde_json::to_string(&ResponseNotRequired {
         response_not_required: true,
+    })
+    .unwrap())
+}
+
+async fn promote_regression_issues(
+    gh_client: &GithubClient,
+    mut words: impl Iterator<Item = &str>,
+) -> anyhow::Result<String> {
+    let past = match words.next() {
+        Some(past) => Label {
+            name: format!("regression-from-stable-to-{}", past),
+        },
+        None => anyhow::bail!("past state not present"),
+    };
+
+    anyhow::ensure!(words.next() == Some("to"), "invalid syntax");
+
+    let current = match words.next() {
+        Some(current) => Label {
+            name: format!("regression-from-stable-to-{}", current),
+        },
+        None => anyhow::bail!("current state not present"),
+    };
+
+    let repo = match words.next() {
+        Some(repo) => {
+            if repo.contains("/") {
+                repo.to_string()
+            } else {
+                format!("rust-lang/{}", repo)
+            }
+        }
+        None => "rust-lang/rust".to_string(),
+    };
+    let repo = Repository { full_name: repo };
+
+    let query = Query {
+        kind: QueryKind::List,
+        filters: Vec::new(),
+        include_labels: vec![&past.name],
+        exclude_labels: Vec::new(),
+    };
+
+    let issues = repo.get_issues(&gh_client, &query).await?;
+    let fut = issues.iter().map(|issue| {
+        let mut labels = issue.labels().to_owned();
+        if let Some(pos) = labels.iter().position(|l| l == &past) {
+            labels.remove(pos);
+        }
+        labels.push(current.clone());
+        issue.set_labels(&gh_client, labels)
+    });
+    futures::future::join_all(fut).await;
+    Ok(serde_json::to_string(&Response {
+        content: "Updated issues successfully!",
     })
     .unwrap())
 }

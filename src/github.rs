@@ -712,6 +712,10 @@ pub struct Repository {
 impl Repository {
     const GITHUB_API_URL: &'static str = "https://api.github.com";
 
+    fn url(&self) -> String {
+        format!("https://api.github.com/repos/{}", self.full_name)
+    }
+
     pub async fn get_issues<'a>(
         &self,
         client: &GithubClient,
